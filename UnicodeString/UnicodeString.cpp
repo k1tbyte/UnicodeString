@@ -1,8 +1,5 @@
 ﻿#include "UnicodeString.h"
 
-#include <string>
-
-
 /// CONSTRUCTORS
 ///
 UnicodeString::UnicodeString(const wchar_t* str)
@@ -28,12 +25,12 @@ UnicodeString::UnicodeString(UnicodeString&& other) noexcept
 
 UnicodeString::UnicodeString(const char* str) 
 {
-	_append(_utf8_decode(str, strlen(str)));
+	_append(_utf8_decode(str));
 }
 
 UnicodeString::UnicodeString(std::string& str) 
 {
-	_append(_utf8_decode(str.c_str(), str.length()));
+	_append(_utf8_decode(str.c_str()));
 }
 
 UnicodeString::UnicodeString(std::wstring& str)
@@ -47,13 +44,13 @@ UnicodeString::UnicodeString(std::wstring& str)
 ///
 std::wostream& operator << (std::wostream& wout, UnicodeString& str)
 {
-	if (str._str_len > 1) wout << str._wstr;
+	if (str._str_len > 0) wout << str._wstr;
 	return wout;
 }
 
 std::ostream& operator << (std::ostream& out, UnicodeString& str)
 {
-	if (str._str_len > 1) out << str._utf8_encode(str._wstr, str._str_len);
+	if (str._str_len > 0) out << _utf8_encode(str._wstr);
 	return out;
 }
 
@@ -218,10 +215,15 @@ UnicodeString& UnicodeString::erase(USHORT pos)
 
 UnicodeString& UnicodeString::explus(const wchar_t& str) 
 {
-	for (int i = 0; i < this->_str_len; i++) {
-		if (this->_wstr[i] == str)
-			_erase(i, 1);
+	int counter = 0;
+	for (int i = _str_len-1; 0 <= i ; i--) {
+		if (_wstr[i] == str) {
+			counter++;
+			for (int j = i; j < _str_len; j++)
+				_wstr[j] = _wstr[j + 1];
+		}
 	}
+	_erase(_str_len - counter, counter);
 	return *this;
 }
 
@@ -422,6 +424,15 @@ UnicodeString& UnicodeString::replace(USHORT pos, size_t len, const UnicodeStrin
 	return *this;
 }
 
+UnicodeString& UnicodeString::replace(const UnicodeString& replacement_str, const UnicodeString& new_str)
+{
+	USHORT pos = _find(replacement_str._wstr, replacement_str._str_len, 0);
+	if (pos != (USHORT)-1)
+		_replace(pos, replacement_str._str_len, new_str._wstr, new_str._str_len);
+	return *this;
+}
+
+
 UnicodeString& UnicodeString::replace(USHORT pos, size_t len, const UnicodeString& other, USHORT subpos, USHORT sublen) 
 {
 	sublen = _getLength(other, subpos, sublen);
@@ -501,6 +512,11 @@ UnicodeString& UnicodeString::insert(USHORT pos, USHORT n, wchar_t c)
 
 /// FIND
 ///
+bool UnicodeString::find(const UnicodeString& other) const
+{
+	return _find(other._wstr, other._str_len, 0) == (USHORT)-1 ? false : true;
+}
+
 USHORT UnicodeString::find(const UnicodeString& other, USHORT pos) const
 {
 	return _find(other._wstr, other._str_len, pos);
@@ -623,6 +639,28 @@ USHORT UnicodeString::find_last_not_of(wchar_t c, USHORT pos) const
 
 
 
+/// SWAP
+///
+void UnicodeString::swap(UnicodeString& other)
+{
+	UnicodeString temp = std::move(*this);
+	*this = std::move(other);
+	other = std::move(temp);
+}
+
+// FRIEND
+void operator <=> (UnicodeString& first, UnicodeString& second) 
+{
+	wchar_t* temp = new wchar_t[first._str_len+1];
+	for (USHORT i = 0; i < first._str_len; i++){
+		temp[i] = first._wstr[i];
+	}
+	first = second;
+	second = temp;
+	delete[] temp;
+}
+
+
 /// DATA
 ///
 UnicodeString UnicodeString::substr(USHORT pos, USHORT len) const
@@ -700,20 +738,123 @@ void UnicodeString::shrink_to_fit()
 	_decreaseCapacity(_str_len); 
 }
 
-void UnicodeString::swap(UnicodeString& other) 
+UnicodeString& UnicodeString::title()
 {
-	UnicodeString temp = std::move(*this);
-	*this = std::move(other);
-	other = std::move(temp);
+	this->to_lower();
+	this->_to_upper(0, 1, "ALL");
+	return *this;
+}
+
+UnicodeString& UnicodeString::unspaced()
+{
+	int counter = 0;
+	for (int i = _str_len - 1; 0 <= i; i--) {
+		if (_wstr[i] == ' ' && _wstr[i+1] == ' ') {
+			counter++;
+			for (int j = i; j < _str_len; j++)
+				_wstr[j] = _wstr[j + 1];
+		}
+	}
+	_erase(_str_len - counter, counter);
+	return *this;
+}
+
+const char* UnicodeString::data() const {
+	return _utf8_encode(_wstr); 
 }
 
 
 
 /// LOCALE
 ///
-UnicodeString& UnicodeString::to_lower(const char* locale)
+UnicodeString& UnicodeString::to_lower(size_t start, size_t end, const char* locale)
 {
-	for (USHORT i = 0; i < _str_len; i++) {
+	_to_lower(start, end, locale);
+	return *this;
+}
+
+UnicodeString& UnicodeString::to_upper(size_t start, size_t end, const char* locale)
+{
+	_to_upper(start, end, locale);
+	return *this;
+}
+
+UnicodeString& UnicodeString::to_upper(const char* locale) {
+	_to_upper(0, _str_len, locale);
+	return *this;
+}
+
+UnicodeString& UnicodeString::to_lower(const char* locale) {
+	to_lower(0, _str_len, locale);
+	return *this;
+}
+
+UnicodeString& UnicodeString::cinFilter(int length, const char* mode, wchar_t min, wchar_t max, int minDig, int maxDig)
+{
+	_clear_str(0);
+	int mode_len = strlen(mode), factive = 0;
+	wchar_t key[1]{};
+	if (mode_len > 3 && min < '0' || mode_len >3 && max > '9') {
+		min = '0'; max = '9';
+	}
+	for (int i = 0; i <= length + 1; i++) {
+	m: key[0] = _getwch();
+		if (i == length + 1) {
+			i--;
+			goto m;
+		}
+		if (GetKeyState(VK_UP) < 0 || GetKeyState(VK_DOWN) < 0 || GetKeyState(VK_RIGHT) < 0 || GetKeyState(VK_LEFT) < 0)
+			goto m;
+		if (key[0] == VK_BACK) {
+			if (i != 0) {
+				if (i == factive)
+					factive = 0;
+				i--;
+				this->_erase(_str_len - 1, 1);
+				std::cout << "\b \b";
+			}
+			goto m;
+		}
+		if (key[0] == VK_RETURN && i != 0) {
+			if (mode_len > 3 && (this->to_float() < minDig || this->to_float() > maxDig))
+				goto m;
+			return *this;
+		}
+		if (mode == "str" && key[0] < min || key[0] > max || mode_len > 4 && key[0] < min || key[0] > max)
+			goto m;
+		if (mode == "calc") {
+			if (key[0] < min && key[0] != L'-' && key[0] != '.' || key[0] > max && key[0] != L'-' && key[0] != L'.')
+				goto m;
+			if (key[0] == L'-' && i != 0) goto m;
+			if (key[0] == L'.') {
+				if (factive != 0 || i == 0) goto m;
+				factive = i;
+			}
+		}
+		if (i != length) {
+			*this += key[0];
+			std::cout << _utf8_encode(key);
+		}
+	}
+}
+
+
+
+/// SOME STR TYPES CONVERT
+///
+UnicodeString::operator std::string() {
+	return _utf8_encode(_wstr);
+}
+
+UnicodeString::operator std::wstring() {
+	return _wstr;
+}
+
+/// PRIVATE
+///
+void UnicodeString::_to_lower(size_t start, size_t end, const char* locale) {
+	start < 0 ? start = 0 : end > this->_str_len ? end = _str_len : true;
+	for (USHORT i = start; i < end; i++) {
 		if (locale == "ALL" || locale == "en_US" || locale == "ru_RU" || locale == "ua_UA") {
 			if (_wstr[i] >= 'A' && _wstr[i] <= 'Z') _wstr[i] += 32;
 			else if (locale == "ru_RU" || locale == "ua_UA" || locale == "ALL") {
@@ -731,14 +872,12 @@ UnicodeString& UnicodeString::to_lower(const char* locale)
 			for (int j = 0; j < 24; j++)
 				if (_wstr[i] == _gr_Up[j]) _wstr[i] = _gr_Down[j];
 		}
-
 	}
-	return *this;
 }
 
-UnicodeString& UnicodeString::to_upper(const char* locale)
-{
-	for (USHORT i = 0; i < _str_len; i++) {
+void UnicodeString::_to_upper(size_t start, size_t end, const char* locale) {
+	start < 0 ? start = 0 : end > this->_str_len ? end = _str_len : true;
+	for (USHORT i = start; i < end; i++) {
 		if (locale == "ALL" || locale == "en_US" || locale == "ru_RU" || locale == "ua_UA") {
 			if (_wstr[i] >= 'a' && _wstr[i] <= 'z') _wstr[i] -= 32;
 			else if (locale == "ru_RU" || locale == "ua_UA" || locale == "ALL") {
@@ -756,15 +895,9 @@ UnicodeString& UnicodeString::to_upper(const char* locale)
 			for (int j = 0; j < 24; j++)
 				if (_wstr[i] == _gr_Down[j]) _wstr[i] = _gr_Up[j];
 		}
-
 	}
-	return *this;
 }
 
-
-
-/// PRIVATE
-///
 USHORT UnicodeString::_find(const wchar_t* other, USHORT len, USHORT pos) const
 {
 	USHORT toReturn = -1;
@@ -895,10 +1028,16 @@ void UnicodeString::_decreaseCapacity(const size_t cap)
 
 bool UnicodeString::_digit_find() 
 {
-	bool key = true;
 	for (USHORT i = 0; i < this->_str_len; i++)
-		if (this->_wstr[i] > '9' || this->_wstr[i] < '0') key = false;
-	return key;
+		if (this->_wstr[i] <= '9' && this->_wstr[i] >= '0') return true;
+	return false;
+}
+
+bool UnicodeString::_symbol_find()
+{
+	for (USHORT i = 0; i < this->_str_len; i++)
+		if (this->_wstr[i] > '9' || this->_wstr[i] < '0') return true;
+	return false;
 }
 
 void UnicodeString::_erase(USHORT position, USHORT len)
@@ -1017,27 +1156,28 @@ void UnicodeString::_alloc_cwstring(wchar_t*& buffer, const USHORT n, wchar_t c)
 	_fill_str(buffer, n, 0, c);
 }
 
-char* UnicodeString::_utf8_encode(const wchar_t* wstr, int nchars) // wide char* to char* decoder
+char* _utf8_encode(const wchar_t* wstr) // wide char* to char* decoder
 {
 	int nbytes = 0;
-	if ((nbytes = WideCharToMultiByte(CP_UTF8, 0x00000080,wstr, nchars, NULL, 0, NULL, NULL)) == 0) 
-		return nullptr;
-	
-	char* str = nullptr;
-	if (!(str = new char[nbytes + 1])) 
+	unsigned short nchars = wcslen(wstr);
+	if ((nbytes = WideCharToMultiByte(CP_UTF8, 0x00000080, wstr, nchars, NULL, 0, NULL, NULL)) == 0)
 		return nullptr;
 
+	char* str = nullptr;
+	if (!(str = new char[nbytes + 1]))return nullptr;
+
 	str[nbytes] = '\0';
-	if (WideCharToMultiByte(CP_UTF8, 0x00000080,wstr, nchars, str, nbytes, NULL, NULL) == 0) {
+	if (WideCharToMultiByte(CP_UTF8, 0x00000080, wstr, nchars, str, nbytes, NULL, NULL) == 0) {
 		delete[] str;
 		return nullptr;
 	}
 	return str;
 }
 
-wchar_t* UnicodeString::_utf8_decode(const char* str, int nbytes) // char* to wide char* decoder
+wchar_t* _utf8_decode(const char* str) // char* to wide char* decoder
 {
 	int nchars = 0;
+	unsigned short nbytes = strlen(str);
 	if ((nchars = MultiByteToWideChar(CP_UTF8,0x00000008, str, nbytes, NULL, 0)) == 0)
 		return nullptr;
 
@@ -1052,3 +1192,6 @@ wchar_t* UnicodeString::_utf8_decode(const char* str, int nbytes) // char* to wi
 	}
 	return wstr;
 }
+
+
+
